@@ -206,6 +206,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+<<<<<<< ours
 # ===========
 # ML Project Additions
 #===============
@@ -220,3 +221,15 @@ data/
 
 # training outputs 
 baseline_training_curves.png
+=======
+# Ignore dataset folder
+data/
+
+# Ignore system files
+.DS_Store
+
+# Ignore Python cache and environments
+__pycache__/
+.venv/
+venv/
+>>>>>>> theirs
