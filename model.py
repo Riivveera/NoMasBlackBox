@@ -6,7 +6,17 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split, Subset
 import matplotlib.pyplot as plt
+from pathlib import Path
 
+ROOT = Path("./data")
+
+# from input, mean and std for cifar100
+CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
+CIFAR100_STD = (0.2675, 0.2565, 0.2761)
+
+# from input, imagenet mean and std for FashionMnist and Plant Disease
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
 NUM_CLASSES = {
     'cifar100': 100,
@@ -14,124 +24,156 @@ NUM_CLASSES = {
     'plant_disease': 38
 }
 
-def get_transforms(dname='cifar100'):
-    # ImageNet normalization values
-    norm = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225])
+def get_transforms(dname='cifar100', augment=False):
+    
+    if dname == 'cifar100':
+        # the training tansform for RGB datasets
+        if augment:
+            train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(20),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+            ])
+        else:
+            # both splits will be the same for the baseline (no aug in exp. #1)
+            train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+            ])
 
-    # defining the training transform for RGB datasets
-    train_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        norm
-    ])
-
-    # defining the validation transform
-    val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        norm
-    ])
+        test_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(CIFAR100_MEAN, CIFAR100_STD),
+        ])
+        return train_transform, test_transform
 
     # adding a grayscale to fashion_mnist --> convert to 3 channels
     if dname == 'fashion_mnist':
-        train_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            # convert to 3-channels
-            transforms.Grayscale(num_output_channels=3),
-            transforms.ToTensor(),
-            norm
+        if augment:
+            train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(20),
+                # convert to 3-channels
+                transforms.Grayscale(num_output_channels=3),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            ])
+        else:
+            # both splits will be the same for the baseline (no aug in exp. #1)
+            train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                # convert to 3-channels
+                transforms.Grayscale(num_output_channels=3),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            ])
+        
+        test_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                # convert to 3-channels
+                transforms.Grayscale(num_output_channels=3),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ])
-
-        val_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.Grayscale(num_output_channels=3),
-            transforms.ToTensor(),
-            norm
+        return train_transform, test_transform
+    
+    # plant disease (RGB, ImageNet normalization)
+    if dname == 'plant_disease':
+        if augment:
+            train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(20),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            ])
+        else:
+            # baseline, no aug
+             train_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            ])
+        
+        test_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ])
-
-    return train_transform, val_transform
+        return train_transform, test_transform
 
 
 # creates data loaders for all 3 datasets
-def load_datasets(val_ratio=0.2, seed=42):
+def load_datasets(val_ratio=0.2, seed=42, augment=False):
     datasets = {}
 
     # 1. CIFAR-100
     print('----CIFAR-100 Loading----')
-    train_transform, val_transform = get_transforms('cifar100')
+    train_transform, test_transform = get_transforms('cifar100', augment=augment)
 
-    trainset = torchvision.datasets.CIFAR100(
-        root='./data', train=True, download=True, transform=train_transform
+    cifar_training = torchvision.datasets.CIFAR100(
+        root=ROOT / "cifar100", train=True, download=True, transform=train_transform
+    )
+
+    cifar_testing = torchvision.datasets.CIFAR100(
+        root=ROOT / "cifar100", train=False, download=True, transform=test_transform
     )
     
-    # train/val split 
-    n_total = len(trainset)
-    n_val = int(val_ratio * n_total)
-    n_train = n_total - n_val
+    cifar_training = Subset(cifar_training, range(5000))
+    cifar_testing = Subset(cifar_testing, range(1000))
 
-    train_subset, val_subset = random_split(
-        trainset,
-        [n_train, n_val],
-        generator = torch.Generator().manual_seed(seed)
+    datasets["cifar100"] = (
+        DataLoader(cifar_training, batch_size=128, shuffle=True, num_workers=2, pin_memory=True),
+        DataLoader(cifar_testing, batch_size=128, shuffle=False, num_workers=2, pin_memory=True),
     )
 
-    # swap val subset dataset transform to val_transform
-    trainset_valT = torchvision.datasets.CIFAR100(
-        root = "./data", train = True, download=False, transform = val_transform
-    )
-    val_subset.dataset = trainset_valT
-
-    datasets['cifar100'] = (train_subset, val_subset)
 
     # Fashion-MNIST
     print('----Fashion-MNIST Loading----')
-    train_transform, val_transform = get_transforms('fashion_mnist')
+    train_transform, test_transform = get_transforms('fashion_mnist', augment=augment)
 
-    trainset = torchvision.datasets.FashionMNIST(
-        root='./data', train=True, download=True, transform=train_transform
+    fm_training = torchvision.datasets.FashionMNIST(
+        root=ROOT / "fmnist", train=True, download=True, transform=train_transform
     )
-    
-    # train/val split 
-    n_total = len(trainset)
-    n_val = int(val_ratio * n_total)
-    n_train = n_total - n_val
-
-    train_subset, val_subset = random_split(
-        trainset,
-        [n_train, n_val],
-        generator = torch.Generator().manual_seed(seed)
+    fm_testing = torchvision.datasets.FashionMNIST(
+        root=ROOT / "fmnist", train=False, download=True, transform=test_transform
     )
 
-    # swap val subset dataset transform to val_transform
-    trainset_valT = torchvision.datasets.FashionMNIST(
-        root = "./data", train = True, download=False, transform = val_transform
-    )
-    val_subset.dataset = trainset_valT
+    fm_training = Subset(fm_training, range(5000))
+    fm_testing = Subset(fm_testing, range(1000))
 
-    datasets['fashion_mnist'] = (train_subset, val_subset)
+    datasets['fashion_mnist'] = (
+        DataLoader(fm_training, batch_size=128, shuffle=True, num_workers=2, pin_memory=True),
+        DataLoader(fm_testing, batch_size=128, shuffle=False, num_workers=2, pin_memory=True),
+    )
+
 
     # plant disease dataset
-    # because this database is not available in torchvision, it needs a custome loading
-    # it expects the structure to be
-    # plant_disease/
-    #   train/class1/, train/class2/, etc
-    #   val/class1/, val/class2/, etc
-    '''
-    print("----Plant Disease Dataset Manual Setup----")
-    train_transform, val_transform = get_transforms('plant_disease')
+    # based on input
+    plant_train = ROOT / "plant_diseases" / "plant_disease_data" / "train"
+    plant_valid = ROOT / "plant_diseases" / "plant_disease_data" / "valid"
+    
+    if plant_train.exists() and plant_valid.exists():
+        print('----Plant Disease Loading----')
+        train_transform, val_transform = get_transforms('plant_disease', augment=augment)
 
-    plant_train = torchvision.datasets.ImageFolder(
-        root='./data/plant_disease/train',
-        transform = train_transform
-    )
-    plant_val = torchvision.datasets.ImageFolder(
-        root='./data/plant_disease/val',
-        transform = val_transform
-    )
-    datasets['plant_disease'] = (plant_train, plant_val)
-    '''
+        pd_train = torchvision.datasets.ImageFolder(str(plant_train), transform=train_transform)
+        pd_val = torchvision.datasets.ImageFolder(str(plant_valid), transform=val_transform)
 
+        datasets["plant_disease"] = (
+            DataLoader(pd_train, batch_size=32, shuffle=True, num_workers=2, pin_memory=True),
+            DataLoader(pd_val, batch_size=32, shuffle=False, num_workers=2, pin_memory=True),
+        )
+    else:
+        print("Plant Disease dataset was not found!!")
+  
     return datasets
 
 # VGG16 setup
@@ -196,11 +238,11 @@ def resnet18_model(num_classes, pretrained=True, freeze_features=False):
     for i in model.fc.parameters():
         i.requires_grad = True
 
-    print(f"Modified ResNet18 fro {num_classes} classes.")
+    print(f"Modified ResNet18 for {num_classes} classes.")
 
     return model
 
-def train_model(model, train_loader, val_loader, num_epochs=10, device='cuda'):
+def train_model(model, train_loader, test_loader, num_epochs=10, device='cuda'):
     # move model to device
     model = model.to(device)
 
@@ -219,7 +261,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, device='cuda'):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     # training history
-    history = {'train_loss': [], 'val_loss': [], 'val_acc': []}
+    history = {'train_loss': [], 'test_loss': [], 'test_acc': []}
 
     for epoch in range(num_epochs):
         # training phase
@@ -251,38 +293,38 @@ def train_model(model, train_loader, val_loader, num_epochs=10, device='cuda'):
 
         epoch_train_loss = train_loss_sum / train_count
 
-        # validation 
+        # testing 
         model.eval()
-        val_loss_sum = 0.0
-        val_count = 0
+        test_loss_sum = 0.0
+        test_count = 0
         correct = 0
 
         with torch.no_grad():
-            for inputs, labels in val_loader:
+            for inputs, labels in test_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
 
                 bs = labels.size(0)
-                val_loss_sum += loss.item() * bs 
-                val_count += bs
+                test_loss_sum += loss.item() * bs 
+                test_count += bs
 
                 preds = outputs.argmax(dim=1)
                 correct += (preds == labels).sum().item()
         
         # calculate metrics
-        epoch_val_loss = val_loss_sum / val_count
-        epoch_val_acc = 100.0 * correct / val_count
+        epoch_test_loss = test_loss_sum / test_count
+        epoch_test_acc = 100.0 * correct / test_count
 
         # save history
         history['train_loss'].append(epoch_train_loss)
-        history['val_loss'].append(epoch_val_loss)
-        history['val_acc'].append(epoch_val_acc)
+        history['test_loss'].append(epoch_test_loss)
+        history['test_acc'].append(epoch_test_acc)
 
         print(f"Epoch {epoch+1}/{num_epochs}:")
         print(f"Train Loss: {epoch_train_loss:.3f}")
-        print(f"Validation Loss: {epoch_val_loss:.3f}")
-        print(f"Validation Accurazy: {epoch_val_acc:.3f}%\n")
+        print(f"Test Loss: {epoch_test_loss:.3f}")
+        print(f"Test Accuracy: {epoch_test_acc:.3f}%\n")
 
         # step the scheduler
         scheduler.step()
@@ -294,85 +336,88 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device} device')
 
-    # load datasets
-    print('Loading Datasets\n')
-    datasets = load_datasets()
 
-    # create data loaders for CIFAR-100 (the baseline)
-    print('Creating Data Loaders - CIFAR-100, the baseline')
+    for experiment in ['baseline', 'augmented']:
+        augment = experiment == 'augmented'
+        # load datasets
+        print('Loading Datasets\n')
+        datasets = load_datasets(augment=augment)
 
-    # debuggin, making small training and validation
-    print("debug start----")
-    small_train = Subset(datasets['cifar100'][0], list(range(200)))
-    small_val = Subset(datasets['cifar100'][1], list(range(50)))
+        for dname in ['cifar100', 'fashion_mnist', 'plant_disease']:
+            # this is a debug to see if plant_disease was not found or downloaded
+            if dname not in datasets:
+                print(f"Dataset {dname} was not found, so skip\n")
+                continue
+            
+            
+            train_loader, test_loader = datasets[dname]
 
-    train_loader = DataLoader(small_train, batch_size=4, shuffle=True, num_workers=0)
-    val_loader = DataLoader(small_val, batch_size=4, shuffle=False, num_workers=0)
+            n_classes = NUM_CLASSES[dname]
 
-    # train vgg16 baseline (no augmentation)
-    print('Training VGG16 Baselein with No Augmentation\n')
+            # train vgg16 
+            print(f"Training VGG16 on {dname} with {experiment}\n")
 
-    v_model = vgg16_model(
-        NUM_CLASSES['cifar100'],
-        pretrained = True,
-        freeze_features = True # fine-tune all layers
-    )
+            v_model = vgg16_model(
+                n_classes,
+                pretrained = True,
+                freeze_features = True # fine-tune only the class head
+            )
     
-    v_model, v_history = train_model(
-        v_model, train_loader, val_loader,
-        num_epochs = 1,
-        device = device
-    )
+            v_model, v_history = train_model(
+                v_model, train_loader, test_loader,
+                num_epochs = 5,
+                device = device
+            )
 
-    print("Debug end---")
 
-    # saving the model for later
-    torch.save(v_model.state_dict(), 'vgg16_cifar100_baseline.pth')
-    print("\nSave VGG16 baseline model\n")
+            # saving the model for later
+            torch.save(v_model.state_dict(), f'vgg16_{dname}_{experiment}.pth')
+            print(f"\nSave VGG16 {dname} model\n")
 
-    # train resnet18 baseline
-    print("Training ResNet18 Basline with No Augmentation\n")
 
-    r_model = resnet18_model(
-        NUM_CLASSES['cifar100'],
-        pretrained = True,
-        freeze_features = False
-    )
+            # train resnet18 baseline
+            print(f"Training ResNet18 on {dname} with {experiment}\n")
 
-    r_model, r_history = train_model(
-        r_model, train_loader, val_loader,
-        num_epochs = 10,
-        device = device
-    )
+            r_model = resnet18_model(
+                n_classes,
+                pretrained = True,
+                freeze_features = False
+            )
 
-    torch.save(r_model.state_dict(), 'resnet18_cifar100_baseline.pth')
-    print("\nSave ResNet18 baseline model\n")
+            r_model, r_history = train_model(
+                r_model, train_loader, test_loader,
+                num_epochs = 5,
+                device = device
+            )
 
-    # plotting training curves
-    print("\nPlotting Training Curves\n")
+            torch.save(r_model.state_dict(), f'resnet18_{dname}_{experiment}.pth')
+            print("\nSave ResNet18 baseline model\n")
 
-    plt.figure(figsize=(12,6))
-    plt.subplot(1, 2, 1)
-    plt.plot(v_history['val_acc'], label="VGG16")
-    plt.plot(r_history['val_acc'], label="ResNet18")
-    plt.title('Validation Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
+            # plotting training curves
+            print("\nPlotting Training Curves\n")
 
-    plt.subplot(1, 2, 2)
-    plt.plot(v_history['val_loss'], label="VGG16")
-    plt.plot(r_history['val_loss'], label="ResNet18")
-    plt.title('Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+            plt.figure(figsize=(12,6))
+            plt.subplot(1, 2, 1)
+            plt.plot(v_history['test_acc'], label="VGG16")
+            plt.plot(r_history['test_acc'], label="ResNet18")
+            plt.title(f'Test Accuracy: {dname}')
+            plt.xlabel('Epoch')
+            plt.ylabel('Accuracy')
+            plt.legend()
 
-    plt.tight_layout()
-    plt.savefig('baseline_training_curves.png')
-    plt.show()
+            plt.subplot(1, 2, 2)
+            plt.plot(v_history['test_loss'], label="VGG16")
+            plt.plot(r_history['test_loss'], label="ResNet18")
+            plt.title(f'Test Loss: {dname}')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.legend()
 
-    print("\nBaseline Training is Done")
+            plt.tight_layout()
+            plt.savefig(f'{dname}_{experiment}_training_curves.png')
+            plt.show()
+
+    print("ALL Training is Done")
     
 if __name__ == "__main__":
     main()
