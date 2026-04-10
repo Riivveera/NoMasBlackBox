@@ -372,7 +372,7 @@ def main():
 
             # saving the model for later
             torch.save(v_model.state_dict(), f'vgg16_{dname}_{experiment}.pth')
-            print(f"\nSave VGG16 {dname} model\n")
+            print(f"\nSave VGG16 {dname}-{experiment} model\n")
 
 
             # train resnet18 baseline
@@ -391,7 +391,7 @@ def main():
             )
 
             torch.save(r_model.state_dict(), f'resnet18_{dname}_{experiment}.pth')
-            print("\nSave ResNet18 baseline model\n")
+            print(f"\nSave ResNet18 {dname}-{experiment} model\n")
 
             # plotting training curves
             print("\nPlotting Training Curves\n")
@@ -400,7 +400,7 @@ def main():
             plt.subplot(1, 2, 1)
             plt.plot(v_history['test_acc'], label="VGG16")
             plt.plot(r_history['test_acc'], label="ResNet18")
-            plt.title(f'Test Accuracy: {dname}')
+            plt.title(f'Test Accuracy: {dname}-{experiment}')
             plt.xlabel('Epoch')
             plt.ylabel('Accuracy')
             plt.legend()
@@ -408,7 +408,7 @@ def main():
             plt.subplot(1, 2, 2)
             plt.plot(v_history['test_loss'], label="VGG16")
             plt.plot(r_history['test_loss'], label="ResNet18")
-            plt.title(f'Test Loss: {dname}')
+            plt.title(f'Test Loss: {dname}-{experiment}')
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
             plt.legend()
