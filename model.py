@@ -4,9 +4,10 @@ import torchvision.models as models
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, random_split, Subset
+from torch.utils.data import DataLoader, Subset
 import matplotlib.pyplot as plt
 from pathlib import Path
+import copy
 
 ROOT = Path("./data")
 
@@ -126,8 +127,8 @@ def load_datasets(val_ratio=0.2, seed=42, augment=False):
         root=ROOT / "cifar100", train=False, download=True, transform=test_transform
     )
     
-    cifar_training = Subset(cifar_training, range(5000))
-    cifar_testing = Subset(cifar_testing, range(1000))
+    # cifar_training = Subset(cifar_training, range(20000))
+    # cifar_testing = Subset(cifar_testing, range(5000))
 
     datasets["cifar100"] = (
         DataLoader(cifar_training, batch_size=128, shuffle=True, num_workers=2, pin_memory=True),
@@ -146,8 +147,8 @@ def load_datasets(val_ratio=0.2, seed=42, augment=False):
         root=ROOT / "fmnist", train=False, download=True, transform=test_transform
     )
 
-    fm_training = Subset(fm_training, range(5000))
-    fm_testing = Subset(fm_testing, range(1000))
+    # fm_training = Subset(fm_training, range(5000))
+    # fm_testing = Subset(fm_testing, range(1000))
 
     datasets['fashion_mnist'] = (
         DataLoader(fm_training, batch_size=128, shuffle=True, num_workers=2, pin_memory=True),
@@ -193,8 +194,9 @@ def vgg16_model(num_classes, pretrained=True, freeze_features=False):
     # freeze convolutional layers if requested
     if freeze_features:
         print('Freezing convolutional layers')
-        for param in model.features.parameters():
-            param.requires_grad = False
+        for layer in list(model.features.children())[:17]:
+            for param in layer.parameters():
+                param.requires_grad = False
 
     # replace classifier head for fine tuning
     # get the input feature of the last layer
@@ -242,7 +244,7 @@ def resnet18_model(num_classes, pretrained=True, freeze_features=False):
 
     return model
 
-def train_model(model, train_loader, test_loader, num_epochs=10, device='cuda'):
+def train_model(model, train_loader, test_loader, num_epochs=20, patience=7, device='cuda'):
     # move model to device
     model = model.to(device)
 
@@ -258,10 +260,13 @@ def train_model(model, train_loader, test_loader, num_epochs=10, device='cuda'):
     )
 
     # learning rate scheduler
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
     # training history
     history = {'train_loss': [], 'test_loss': [], 'test_acc': []}
+    best_test_acc = 0.0
+    epochs_no_imporove = 0
+    best_model_state = None
 
     for epoch in range(num_epochs):
         # training phase
@@ -326,8 +331,27 @@ def train_model(model, train_loader, test_loader, num_epochs=10, device='cuda'):
         print(f"Test Loss: {epoch_test_loss:.3f}")
         print(f"Test Accuracy: {epoch_test_acc:.3f}%\n")
 
+        # early stopping
+        if epoch_test_acc > best_test_acc:
+            best_test_acc = epoch_test_acc
+            epochs_no_imporove = 0
+            # save best model
+            best_model_state = copy.deepcopy(model.state_dict())
+            print(f"New best accuracy {best_test_acc:.2f}%")
+        else:
+            epochs_no_imporove += 1
+            print(f"There has been no improvement for {epochs_no_imporove} epochs")
+
+        if epochs_no_imporove >= patience:
+            print(f"Early stopping after {epoch + 1} epochs")
+            break
+
         # step the scheduler
         scheduler.step()
+    
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print(f"Best model with test accuracy {best_test_acc:.2f}%")
 
     return model, history
 
@@ -365,7 +389,8 @@ def main():
     
             v_model, v_history = train_model(
                 v_model, train_loader, test_loader,
-                num_epochs = 5,
+                num_epochs = 20,
+                patience=7,
                 device = device
             )
 
@@ -386,7 +411,8 @@ def main():
 
             r_model, r_history = train_model(
                 r_model, train_loader, test_loader,
-                num_epochs = 5,
+                num_epochs = 20,
+                patience=7,
                 device = device
             )
 
