@@ -194,9 +194,8 @@ def vgg16_model(num_classes, pretrained=True, freeze_features=False):
     # freeze convolutional layers if requested
     if freeze_features:
         print('Freezing convolutional layers')
-        for layer in list(model.features.children())[:17]:
-            for param in layer.parameters():
-                param.requires_grad = False
+        for param in model.features.parameters():
+            param.requires_grad = False
 
     # replace classifier head for fine tuning
     # get the input feature of the last layer
@@ -206,7 +205,10 @@ def vgg16_model(num_classes, pretrained=True, freeze_features=False):
     model.classifier[6] = nn.Sequential(
         # dropout for regularization
         nn.Dropout(0.5),
-        nn.Linear(in_features, num_classes)
+        nn.Linear(in_features, 512),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+        nn.Linear(512, num_classes)
     )
 
     print(f"Modified VGG16 for {num_classes} classes.")
@@ -234,7 +236,10 @@ def resnet18_model(num_classes, pretrained=True, freeze_features=False):
 
     # replace final FC layer
     in_features = model.fc.in_features
-    model.fc = nn.Linear(in_features, num_classes)
+    model.fc = nn.Sequential(
+        nn.Dropout(0.3),
+        nn.Linear(in_features, num_classes)
+    )
 
     # if frozen, ensure fc trains
     for i in model.fc.parameters():
@@ -244,7 +249,7 @@ def resnet18_model(num_classes, pretrained=True, freeze_features=False):
 
     return model
 
-def train_model(model, train_loader, test_loader, num_epochs=20, patience=7, device='cuda'):
+def train_model(model, train_loader, test_loader, num_epochs=20, patience=5, device='cuda'):
     # move model to device
     model = model.to(device)
 
@@ -384,13 +389,13 @@ def main():
             v_model = vgg16_model(
                 n_classes,
                 pretrained = True,
-                freeze_features = True # fine-tune only the class head
+                freeze_features = False # for fine-tuning
             )
     
             v_model, v_history = train_model(
                 v_model, train_loader, test_loader,
                 num_epochs = 20,
-                patience=7,
+                patience=5,
                 device = device
             )
 
@@ -412,7 +417,7 @@ def main():
             r_model, r_history = train_model(
                 r_model, train_loader, test_loader,
                 num_epochs = 20,
-                patience=7,
+                patience=5,
                 device = device
             )
 
